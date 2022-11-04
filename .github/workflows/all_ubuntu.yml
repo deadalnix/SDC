@@ -14,7 +14,8 @@ jobs:
                 dc: [dmd-latest]
 
         runs-on: ${{ matrix.os }}
-
+        env:
+            USE_LOWMEM: 1
         steps:
             - name: Checkout SDC
               uses: actions/checkout@v2

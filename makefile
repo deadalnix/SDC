@@ -8,6 +8,11 @@ PLATFORM = $(shell uname -s)
 
 # DFLAGS = $(ARCHFLAG) -w -O -release
 
+# Useful for CI.
+ifdef USE_LOWMEM
+	DFLAGS += -lowmem
+endif
+
 # dmd.conf doesn't set the proper -L flags.  
 # Fix it here until dmd installer is updated
 ifeq ($(PLATFORM),Darwin)

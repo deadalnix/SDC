@@ -3,6 +3,7 @@ module source.escapesequence;
 enum SequenceType {
 	Invalid,
 	Character,
+	MultiCodePointHtmlEntity,
 }
 
 struct EscapeSequence {
@@ -19,10 +20,16 @@ private:
 		// sdfmt on
 	));
 
-	import source.name;
-	Name _name;
+	union {
+		wchar _second;
+
+		import source.name;
+		Name _name;
+	}
 
 	union {
+		dchar _first;
+
 		import source.decodedchar;
 		DecodedChar _decodedChar;
 
@@ -50,6 +57,15 @@ public:
 		return r;
 	}
 
+	static multiCodePointHtmlEntity(dchar first, wchar second) {
+		EscapeSequence r;
+		r._type = SequenceType.MultiCodePointHtmlEntity;
+		r._first = first;
+		r._second = second;
+
+		return r;
+	}
+
 	@property
 	auto type() const {
 		return _type;
@@ -70,8 +86,31 @@ public:
 		return _decodedChar;
 	}
 
+	@property
+	auto first() const in(type == SequenceType.MultiCodePointHtmlEntity) {
+		return _first;
+	}
+
+	@property
+	auto second() const in(type == SequenceType.MultiCodePointHtmlEntity) {
+		return _second;
+	}
+
 	string appendTo(string s) const in(type != SequenceType.Invalid) {
-		return decodedChar.appendTo(s);
+		if (type == SequenceType.Character) {
+			return decodedChar.appendTo(s);
+		}
+
+		char[4] buf;
+
+		import std.utf;
+		auto i = encode(buf, first);
+		s ~= buf[0 .. i];
+
+		i = encode(buf, second);
+		s ~= buf[0 .. i];
+
+		return s;
 	}
 }
 
