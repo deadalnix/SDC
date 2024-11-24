@@ -41,7 +41,6 @@ private:
 
 		import d.gc.thread;
 		stopTheWorld();
-		scope(exit) restartTheWorld();
 
 		import d.gc.global;
 		auto gcCycle = gState.nextGCCycle();
@@ -65,13 +64,15 @@ private:
 		 * We might have allocated, and therefore refilled the bin
 		 * during the collection process. As a result, slots in the
 		 * bins may not be marked at this point.
-		 * 
+		 *
 		 * The straightforward way to handle this is simply to flush
 		 * the bins.
-		 * 
+		 *
 		 * Alternatively, we could make sure the slots are marked.
 		 */
 		threadCache.flush();
+
+		restartTheWorld();
 
 		collect(gcCycle);
 
@@ -82,6 +83,9 @@ private:
 		 * phase.
 		 */
 		gState.minimizeRoots();
+
+		// allow threads to do busyState things.
+		clearWorldProbation();
 	}
 
 	void prepareGCCycle() {

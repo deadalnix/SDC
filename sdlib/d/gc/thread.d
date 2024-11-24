@@ -85,6 +85,10 @@ void restartTheWorld() {
 	gThreadState.restartTheWorld();
 }
 
+void clearWorldProbation() {
+	gThreadState.clearWorldProbation();
+}
+
 void threadScan(ScanDg scan) {
 	// Scan the registered TLS segments.
 	foreach (s; threadCache.tlsSegments) {
@@ -197,10 +201,18 @@ public:
 			sched_yield();
 		}
 
-		stopTheWorldMutex.unlock();
-
 		import d.gc.hooks;
 		__sd_gc_post_restart_the_world_hook();
+	}
+
+	void clearWorldProbation() shared {
+		assert(stopTheWorldMutex.isHeld());
+		scope(exit) stopTheWorldMutex.unlock();
+
+		mThreadList.lock();
+		scope(exit) mThreadList.unlock();
+
+		(cast(ThreadState*) &this).clearWorldProbationImpl();
 	}
 
 	void scanSuspendedThreads(ScanDg scan) shared {
@@ -312,6 +324,11 @@ private:
 			auto tc = r.front;
 			scope(success) r.popFront();
 
+			// No need to resume our own thread!
+			if (tc is &threadCache) {
+				continue;
+			}
+
 			// If the thread isn't already resumed, we'll need to retry.
 			auto ss = tc.state.suspendState;
 			if (ss == SuspendState.Detached) {
@@ -319,7 +336,7 @@ private:
 			}
 
 			suspended += ss == SuspendState.Suspended;
-			retry |= ss != SuspendState.None;
+			retry |= ss != SuspendState.Probation;
 
 			// If the thread isn't suspended, move on.
 			if (ss != SuspendState.Suspended) {
@@ -335,6 +352,23 @@ private:
 
 		suspendedThreadCount = suspended;
 		return retry;
+	}
+
+	void clearWorldProbationImpl() {
+		assert(mThreadList.isHeld(), "Mutex not held!");
+
+		auto r = registeredThreads.range;
+		while (!r.empty) {
+			auto tc = r.front;
+			scope(success) r.popFront();
+
+			auto ss = tc.state.suspendState;
+			if (ss != SuspendState.Probation) {
+				continue;
+			}
+
+			tc.state.clearProbationState();
+		}
 	}
 
 	void scanSuspendedThreadsImpl(ScanDg scan) {
