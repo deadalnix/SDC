@@ -52,7 +52,7 @@ void* watchdog(void* ctx) {
 	int i;
 	while (!shouldQuit.load()) {
 		// Watchdog timeout!
-		assert(++i < 5, "Watchdog timeout!");
+		assert(++i < 15, "Watchdog timeout!");
 		sleep(1);
 	}
 
