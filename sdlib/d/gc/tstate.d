@@ -283,22 +283,46 @@ unittest suspend {
 
 	import d.sync.atomic;
 	shared Atomic!uint resumeCount;
+	shared Atomic!uint lockedProbationCount;
 	shared Atomic!uint mustStop;
+
+	bool checkSuspend() {
+		if (s.suspendState != SuspendState.Suspended) {
+			return false;
+		}
+
+		resumeCount.fetchAdd(1);
+
+		import d.gc.signal;
+		signalThreadResume(tc);
+
+		while (s.suspendState == SuspendState.Suspended) {
+			import sys.posix.sched;
+			sched_yield();
+		}
+
+		return true;
+	}
+
+	bool checkProbation() {
+		/*
+		 * Clear probation when in busy state, the main thread will
+		 * have locked and is waiting for an external thread to clear
+		 * it.
+		 */
+		if (s.suspendState != SuspendState.Probation || !s.busy) {
+			return false;
+		}
+
+		lockedProbationCount.fetchAdd(1);
+
+		s.clearProbationState();
+		return true;
+	}
 
 	void* autoResume() {
 		while (mustStop.load() == 0) {
-			if (s.suspendState != SuspendState.Suspended) {
-				import sys.posix.sched;
-				sched_yield();
-				continue;
-			}
-
-			resumeCount.fetchAdd(1);
-
-			import d.gc.signal;
-			signalThreadResume(tc);
-
-			while (s.suspendState == SuspendState.Suspended) {
+			if (!checkSuspend() && !checkProbation()) {
 				import sys.posix.sched;
 				sched_yield();
 			}
@@ -330,6 +354,10 @@ unittest suspend {
 	check(SuspendState.Signaled, false, 0);
 
 	assert(s.onSuspendSignal());
+	check(SuspendState.Probation, false, 1);
+
+	// Clear the probation
+	s.clearProbationState();
 	check(SuspendState.None, false, 1);
 
 	// Signal while busy.
@@ -347,5 +375,14 @@ unittest suspend {
 	check(SuspendState.Delayed, true, 1);
 
 	assert(s.exitBusyState());
+	check(SuspendState.Probation, false, 2);
+
+	// Enter busy state while on probation
+	assert(lockedProbationCount.load() == 0);
+	s.enterBusyState();
+	assert(lockedProbationCount.load() == 1);
+	check(SuspendState.None, true, 2);
+
+	assert(!s.exitBusyState());
 	check(SuspendState.None, false, 2);
 }
