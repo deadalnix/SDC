@@ -158,7 +158,8 @@ public:
 			return;
 		}
 
-		// In Resumed state, we need to wait until the GC cycle is done before doing anything.
+		// In Probation state, we need to wait until the GC cycle is
+		// done before doing anything.
 		busyWaitMutex.lock();
 		scope(exit) busyWaitMutex.unlock();
 		busyWaitMutex.waitFor(offProbation);
@@ -356,7 +357,7 @@ unittest suspend {
 	assert(s.onSuspendSignal());
 	check(SuspendState.Probation, false, 1);
 
-	// Clear the probation
+	// Clear the probation.
 	s.clearProbationState();
 	check(SuspendState.None, false, 1);
 
@@ -377,7 +378,7 @@ unittest suspend {
 	assert(s.exitBusyState());
 	check(SuspendState.Probation, false, 2);
 
-	// Enter busy state while on probation
+	// Enter busy state while on probation.
 	assert(lockedProbationCount.load() == 0);
 	s.enterBusyState();
 	assert(lockedProbationCount.load() == 1);
