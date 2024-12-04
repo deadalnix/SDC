@@ -115,7 +115,7 @@ void initThread() {
 struct ThreadState {
 private:
 	import d.sync.atomic;
-	Atomic!uint startingThreadCount;
+	uint startingThreadCount;
 	enum uint WorldIsStoppingBit = 1 << 31;
 
 	import d.sync.mutex;
@@ -129,25 +129,24 @@ private:
 
 	Mutex stopTheWorldMutex;
 
+	shared Mutex createThreadMutex;
+
 public:
 	/**
 	 * Thread management.
 	 */
 	void enterThreadCreation() shared {
-		auto tc = startingThreadCount.fetchAdd(1);
-		import d.gc.tcache;
-		if ((tc & WorldIsStoppingBit) && !threadCache.stoppingTheWorld) {
-			// Another thread is stopping the world. Suspended
-			// threads can hold crucial pthread locks, we cannot
-			// start a thread now. Sync on the mutex.
-			stopTheWorldMutex.lock();
-			stopTheWorldMutex.unlock();
-		}
+		createThreadMutex.lock();
+		scope(exit) createThreadMutex.unlock();
+
+		(cast(ThreadState*) &this).enterThreadCreationImpl();
 	}
 
 	void exitThreadCreation() shared {
-		auto s = startingThreadCount.fetchSub(1);
-		assert(s > 0, "enterThreadCreation was not called!");
+		createThreadMutex.lock();
+		scope(exit) createThreadMutex.unlock();
+
+		(cast(ThreadState*) &this).exitThreadCreationImpl();
 	}
 
 	void register(ThreadCache* tcache) shared {
@@ -192,42 +191,30 @@ public:
 
 		stopTheWorldMutex.lock();
 
+		prepareWorldStopping();
+
 		import d.gc.tcache;
 		threadCache.stoppingTheWorld = true;
 
 		uint count;
-		import sys.posix.sched;
-		uint tc = 0;
-		while (!startingThreadCount.casWeak(tc, WorldIsStoppingBit)) {
-			sched_yield();
-			assert(!(tc & WorldIsStoppingBit));
-			tc = 0; // Existing value must be 0
-		}
 
 		while (suspendRunningThreads(count++)) {
+			import sys.posix.sched;
 			sched_yield();
 		}
 	}
 
 	void restartTheWorld() shared {
-		// remove the WorldIsStopping bit from the starting thread count
-		auto tc = startingThreadCount.load();
-		while (true) {
-			assert(tc & WorldIsStoppingBit);
-			auto ntc = tc & ~WorldIsStoppingBit;
+		import d.gc.tcache;
+		assert(threadCache.stoppingTheWorld);
+		threadCache.stoppingTheWorld = false;
 
-			if (startingThreadCount.casWeak(tc, ntc)) {
-				break;
-			}
-		}
+		allowThreadCreation();
 
 		while (resumeSuspendedThreads()) {
 			import sys.posix.sched;
 			sched_yield();
 		}
-
-		import d.gc.tcache;
-		threadCache.stoppingTheWorld = false;
 
 		stopTheWorldMutex.unlock();
 
@@ -255,6 +242,68 @@ private:
 		}
 
 		registeredThreads.insert(tcache);
+	}
+
+	void enterThreadCreationImpl() {
+		assert(createThreadMutex.isHeld(), "Mutex not held!");
+
+		// Wait for the world to not be stopping by another thread.
+		import d.gc.tcache;
+		if (!threadCache.stoppingTheWorld) {
+			createThreadMutex.waitFor(canCreateThreads);
+			assert(!(startingThreadCount & WorldIsStoppingBit));
+		}
+
+		++startingThreadCount;
+	}
+
+	bool canCreateThreads() {
+		return !(startingThreadCount & WorldIsStoppingBit);
+	}
+
+	void exitThreadCreationImpl() {
+		assert(createThreadMutex.isHeld(), "Mutex not held!");
+		assert((startingThreadCount & ~WorldIsStoppingBit) > 0,
+		       "enterThreadCreation was not called!");
+
+		startingThreadCount--;
+	}
+
+	void prepareWorldStopping() shared {
+		createThreadMutex.lock();
+		scope(exit) createThreadMutex.unlock();
+
+		(cast(ThreadState*) &this).prepareWorldStoppingImpl();
+	}
+
+	void prepareWorldStoppingImpl() {
+		assert(createThreadMutex.isHeld(), "Mutex not held!");
+		assert((startingThreadCount & WorldIsStoppingBit) == 0);
+
+		/**
+		 * Wait for threads in the process of starting to finish
+		 * starting, prevent any new threads from starting.
+		 */
+		startingThreadCount += WorldIsStoppingBit;
+		createThreadMutex.waitFor(canStopTheWorld);
+	}
+
+	bool canStopTheWorld() {
+		return startingThreadCount == WorldIsStoppingBit;
+	}
+
+	void allowThreadCreation() shared {
+		createThreadMutex.lock();
+		scope(exit) createThreadMutex.unlock();
+
+		(cast(ThreadState*) &this).allowThreadCreationImpl();
+	}
+
+	void allowThreadCreationImpl() {
+		assert(createThreadMutex.isHeld(), "Mutex not held!");
+		assert(startingThreadCount == WorldIsStoppingBit);
+
+		startingThreadCount -= WorldIsStoppingBit;
 	}
 
 	void removeImpl(ThreadCache* tcache) {
