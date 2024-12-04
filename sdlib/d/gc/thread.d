@@ -116,6 +116,7 @@ struct ThreadState {
 private:
 	import d.sync.atomic;
 	Atomic!uint startingThreadCount;
+	enum uint WorldIsStoppingBit = 1 << 31;
 
 	import d.sync.mutex;
 	shared Mutex mStats;
@@ -133,7 +134,15 @@ public:
 	 * Thread management.
 	 */
 	void enterThreadCreation() shared {
-		startingThreadCount.fetchAdd(1);
+		auto tc = startingThreadCount.fetchAdd(1);
+		import d.gc.tcache;
+		if ((tc & WorldIsStoppingBit) && !threadCache.stoppingTheWorld) {
+			// Another thread is stopping the world. Suspended
+			// threads can hold crucial pthread locks, we cannot
+			// start a thread now. Sync on the mutex.
+			stopTheWorldMutex.lock();
+			stopTheWorldMutex.unlock();
+		}
 	}
 
 	void exitThreadCreation() shared {
@@ -183,19 +192,42 @@ public:
 
 		stopTheWorldMutex.lock();
 
+		import d.gc.tcache;
+		threadCache.stoppingTheWorld = true;
+
 		uint count;
-		while (suspendRunningThreads(count++)
-			       || startingThreadCount.load() > 0) {
-			import sys.posix.sched;
+		import sys.posix.sched;
+		uint tc = 0;
+		while (!startingThreadCount.casWeak(tc, WorldIsStoppingBit)) {
+			sched_yield();
+			assert(!(tc & WorldIsStoppingBit));
+			tc = 0; // Existing value must be 0
+		}
+
+		while (suspendRunningThreads(count++)) {
 			sched_yield();
 		}
 	}
 
 	void restartTheWorld() shared {
+		// remove the WorldIsStopping bit from the starting thread count
+		auto tc = startingThreadCount.load();
+		while (true) {
+			assert(tc & WorldIsStoppingBit);
+			auto ntc = tc & ~WorldIsStoppingBit;
+
+			if (startingThreadCount.casWeak(tc, ntc)) {
+				break;
+			}
+		}
+
 		while (resumeSuspendedThreads()) {
 			import sys.posix.sched;
 			sched_yield();
 		}
+
+		import d.gc.tcache;
+		threadCache.stoppingTheWorld = false;
 
 		stopTheWorldMutex.unlock();
 

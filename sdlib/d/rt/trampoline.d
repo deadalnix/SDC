@@ -13,18 +13,19 @@ extern(C) int pthread_create(pthread_t* thread, const pthread_attr_t* attr,
 	auto runner = new ThreadRunner(start_routine, arg);
 
 	/**
+	 * We notify the GC that we are starting a new thread.
+	 * This allows the GC to not stop the world while a thread
+	 * is being created. When this returns, the world should never be
+	 * stopping until the thread is out of the critical stage.
+	 */
+	enterThreadCreation();
+
+	/**
 	 * We do not want the GC to stop this specific thread
 	 * while it is creating another thread.
 	 */
 	enterBusyState();
 	scope(exit) exitBusyState();
-
-	/**
-	 * We notify the GC that we are starting a new thread.
-	 * This allows the GC to not stop the workd while a thread
-	 * is being created.
-	 */
-	enterThreadCreation();
 
 	auto ret =
 		pthread_create_trampoline(thread, attr, cast(PthreadFunction) runThread,
