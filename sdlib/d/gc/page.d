@@ -849,13 +849,7 @@ private:
 				auto nslots = binInfos[sc].nslots;
 				auto nimble = alignUp(nslots, 64) / 64;
 
-				ulong* bmp;
-				if (ec.supportsInlineMarking) {
-					bmp = cast(ulong*) &e.slabMetadataMarks;
-				} else {
-					bmp = e.outlineMarksBuffer;
-					e.outlineMarksBuffer = null;
-				}
+				ulong* bmp = e.getMarksDenseAndClearOutlines();
 
 				assert(bmp !is null);
 

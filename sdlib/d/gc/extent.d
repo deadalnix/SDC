@@ -545,6 +545,14 @@ public:
 		return gcCycle == gcWord.load();
 	}
 
+	ulong* getMarksDenseAndClearOutlines() {
+		return getMarksDenseImpl!true();
+	}
+
+	ulong* getMarksDense() {
+		return getMarksDenseImpl!false();
+	}
+
 	@property
 	ref shared(Atomic!ulong) gcWord() {
 		assert(extentClass.sparse, "size class not sparse!");
@@ -579,6 +587,22 @@ public:
 	void setFinalizer(Finalizer finalizer) {
 		assert(isLarge(), "Cannot set finalizer on a slab alloc!");
 		_metadata.largeData.finalizer = finalizer;
+	}
+
+private:
+
+	ulong* getMarksDenseImpl(bool clearOutlines)() {
+		assert(extentClass.dense, "Size class not dense!");
+		if (extentClass.supportsInlineMarking) {
+			return cast(ulong*) &slabMetadataMarks;
+		}
+
+		auto bmp = outlineMarksBuffer;
+		if (clearOutlines) {
+			outlineMarksBuffer = null;
+		}
+
+		return bmp;
 	}
 }
 
