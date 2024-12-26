@@ -1,6 +1,7 @@
 module d.gc.tstate;
 
 import sdc.intrinsics;
+import d.gc.tcache;
 
 enum SuspendState {
 	// The thread is running as usual.
@@ -13,6 +14,8 @@ enum SuspendState {
 	Suspended,
 	// The thread is in the process of resuming operations.
 	Resumed,
+	// The thread cannot use the GC because a collect is happening.
+	Probation,
 	// The thread is detached. The GC won't stop it.
 	Detached,
 }
@@ -25,7 +28,9 @@ static auto status(size_t v) {
 struct ThreadState {
 private:
 	import d.sync.atomic;
+	import d.sync.mutex;
 	shared Atomic!size_t state;
+	shared Mutex busyWaitMutex;
 
 	enum BusyIncrement = 0x08;
 
@@ -34,6 +39,7 @@ private:
 	enum SuspendedState = SuspendState.Suspended;
 	enum DelayedState = SuspendState.Delayed;
 	enum ResumedState = SuspendState.Resumed;
+	enum ProbationState = SuspendState.Probation;
 
 	enum MustSuspendState = BusyIncrement | SuspendState.Delayed;
 
@@ -115,14 +121,48 @@ public:
 		}
 	}
 
+	void clearProbationState() {
+		size_t s = ProbationState;
+		if (state.casWeak(s, RunningState)) {
+			return;
+		}
+
+		// The thread has now tried to enter a busy state. Must use the
+		// lock to to wake it up.
+		busyWaitMutex.lock();
+		scope(exit) busyWaitMutex.unlock();
+		while (true) {
+			enum BusyMask = ~(BusyIncrement - 1);
+			auto n = s & BusyMask;
+
+			assert(s >= BusyIncrement);
+			assert(n >= BusyIncrement);
+			assert(status(s) == ProbationState);
+			assert(status(n) == RunningState);
+
+			if (state.casWeak(s, n)) {
+				break;
+			}
+		}
+	}
+
 	void onResumeSignal() {
 		assert(state.load() == ResumedState);
-		state.store(RunningState);
+		state.store(ProbationState);
 	}
 
 	void enterBusyState() {
 		auto s = state.fetchAdd(BusyIncrement);
 		assert(status(s) != SuspendState.Suspended);
+		if (status(s) != ProbationState) {
+			return;
+		}
+
+		// In Probation state, we need to wait until the GC cycle is
+		// done before doing anything.
+		busyWaitMutex.lock();
+		scope(exit) busyWaitMutex.unlock();
+		busyWaitMutex.waitFor(offProbation);
 	}
 
 	bool exitBusyState() {
@@ -144,6 +184,12 @@ package:
 	}
 
 private:
+	bool offProbation() {
+		auto s = state.load();
+		assert(s >= BusyIncrement);
+		return status(s) != ProbationState;
+	}
+
 	bool exitBusyStateSlow(size_t s) {
 		while (true) {
 			assert(s >= BusyIncrement);
@@ -238,22 +284,46 @@ unittest suspend {
 
 	import d.sync.atomic;
 	shared Atomic!uint resumeCount;
+	shared Atomic!uint lockedProbationCount;
 	shared Atomic!uint mustStop;
+
+	bool checkSuspend() {
+		if (s.suspendState != SuspendState.Suspended) {
+			return false;
+		}
+
+		resumeCount.fetchAdd(1);
+
+		import d.gc.signal;
+		signalThreadResume(tc);
+
+		while (s.suspendState == SuspendState.Suspended) {
+			import sys.posix.sched;
+			sched_yield();
+		}
+
+		return true;
+	}
+
+	bool checkProbation() {
+		/*
+		 * Clear probation when in busy state, the main thread will
+		 * have locked and is waiting for an external thread to clear
+		 * it.
+		 */
+		if (s.suspendState != SuspendState.Probation || !s.busy) {
+			return false;
+		}
+
+		lockedProbationCount.fetchAdd(1);
+
+		s.clearProbationState();
+		return true;
+	}
 
 	void* autoResume() {
 		while (mustStop.load() == 0) {
-			if (s.suspendState != SuspendState.Suspended) {
-				import sys.posix.sched;
-				sched_yield();
-				continue;
-			}
-
-			resumeCount.fetchAdd(1);
-
-			import d.gc.signal;
-			signalThreadResume(tc);
-
-			while (s.suspendState == SuspendState.Suspended) {
+			if (!checkSuspend() && !checkProbation()) {
 				import sys.posix.sched;
 				sched_yield();
 			}
@@ -285,6 +355,10 @@ unittest suspend {
 	check(SuspendState.Signaled, false, 0);
 
 	assert(s.onSuspendSignal());
+	check(SuspendState.Probation, false, 1);
+
+	// Clear the probation.
+	s.clearProbationState();
 	check(SuspendState.None, false, 1);
 
 	// Signal while busy.
@@ -302,5 +376,14 @@ unittest suspend {
 	check(SuspendState.Delayed, true, 1);
 
 	assert(s.exitBusyState());
+	check(SuspendState.Probation, false, 2);
+
+	// Enter busy state while on probation.
+	assert(lockedProbationCount.load() == 0);
+	s.enterBusyState();
+	assert(lockedProbationCount.load() == 1);
+	check(SuspendState.None, true, 2);
+
+	assert(!s.exitBusyState());
 	check(SuspendState.None, false, 2);
 }
