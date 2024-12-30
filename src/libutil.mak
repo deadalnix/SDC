@@ -10,7 +10,7 @@ $(LIBUTIL): obj/util.o
 	ar rcs "$@" $^
 
 check-util: $(LIBUTIL_SRC)
-	$(RDMD) $(DFLAGS) -unittest -i $(addprefix --extra-file=, $^) --eval="assert(true)"
+	$(DMD) $(DFLAGS) -unittest -i -main -run $^
 
 check: check-util
 .PHONY: check-util
