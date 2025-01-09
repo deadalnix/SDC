@@ -20,13 +20,6 @@ extern(C) int pthread_create(pthread_t* thread, const pthread_attr_t* attr,
 	 */
 	enterThreadCreation();
 
-	/**
-	 * We do not want the GC to stop this specific thread
-	 * while it is creating another thread.
-	 */
-	enterBusyState();
-	scope(exit) exitBusyState();
-
 	auto ret =
 		pthread_create_trampoline(thread, attr, cast(PthreadFunction) runThread,
 		                          runner);
@@ -35,6 +28,18 @@ extern(C) int pthread_create(pthread_t* thread, const pthread_attr_t* attr,
 		exitThreadCreation();
 	}
 
+	return ret;
+}
+
+// This special hook does not involve the stop-the-world shared lock, but
+// otherwise creates a thread in the same way.
+int createThreadFromGC(pthread_t* thread, const pthread_attr_t* attr,
+                       PthreadFunction start_routine, void* arg) {
+	auto runner = new ThreadRunner(start_routine, arg);
+
+	auto ret =
+		pthread_create_trampoline(thread, attr,
+		                          cast(PthreadFunction) runGCThread, runner);
 	return ret;
 }
 
@@ -54,7 +59,20 @@ void* runThread(ThreadRunner* runner) {
 	auto fun = runner.fun;
 	auto arg = runner.arg;
 
-	createThread();
+	createThread(false);
+	__sd_gc_free(runner);
+
+	// Make sure we clean up after ourselves.
+	scope(exit) destroyThread();
+
+	return fun(arg);
+}
+
+void* runGCThread(ThreadRunner* runner) {
+	auto fun = runner.fun;
+	auto arg = runner.arg;
+
+	createThread(true);
 	__sd_gc_free(runner);
 
 	// Make sure we clean up after ourselves.

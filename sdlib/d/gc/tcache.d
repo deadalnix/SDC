@@ -72,7 +72,6 @@ private:
 	 */
 	size_t nextGCRun;
 	bool enableGC;
-	bool stoppingTheWorld;
 
 	int nextGCRunClassOffset;
 	uint consecutiveSuccessfulGCRuns;
