@@ -68,7 +68,7 @@ public:
 		// First thing, start the worker threads, so they can do work ASAP.
 		foreach (ref tid; threads) {
 			import d.rt.trampoline;
-			createThreadFromGC(&tid, null, markThreadEntry, cast(void*) &this);
+			createGCThread(&tid, null, markThreadEntry, cast(void*) &this);
 		}
 
 		// Scan the roots.

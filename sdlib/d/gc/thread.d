@@ -28,7 +28,7 @@ void createThread(bool isGCThread) {
 	enterBusyState();
 	scope(exit) {
 		if (!isGCThread) {
-			exitThreadCreation();
+			allowStopTheWorld();
 		}
 
 		exitBusyState();
@@ -52,12 +52,12 @@ void destroyThread() {
 	gThreadState.remove(&threadCache);
 }
 
-void enterThreadCreation() {
-	gThreadState.enterThreadCreation();
+void preventStopTheWorld() {
+	gThreadState.preventStopTheWorld();
 }
 
-void exitThreadCreation() {
-	gThreadState.exitThreadCreation();
+void allowStopTheWorld() {
+	gThreadState.allowStopTheWorld();
 }
 
 uint getRegisteredThreadCount() {
@@ -118,7 +118,6 @@ void initThread() {
 struct ThreadState {
 private:
 	import d.sync.mutex;
-	import d.sync.sharedlock;
 	shared Mutex mStats;
 
 	uint registeredThreadCount = 0;
@@ -127,20 +126,24 @@ private:
 	Mutex mThreadList;
 	ThreadRing registeredThreads;
 
-	shared SharedLock createThreadLock;
+	import d.sync.sharedlock;
+	shared SharedLock stopTheWorldLock;
 
 public:
 	/**
+	 * Stop the world prevention.
+	 */
+	void preventStopTheWorld() shared {
+		stopTheWorldLock.sharedLock();
+	}
+
+	void allowStopTheWorld() shared {
+		stopTheWorldLock.sharedUnlock();
+	}
+
+	/**
 	 * Thread management.
 	 */
-	void enterThreadCreation() shared {
-		createThreadLock.sharedLock();
-	}
-
-	void exitThreadCreation() shared {
-		createThreadLock.sharedUnlock();
-	}
-
 	void register(ThreadCache* tcache) shared {
 		mThreadList.lock();
 		scope(exit) mThreadList.unlock();
@@ -182,7 +185,7 @@ public:
 		__sd_gc_pre_stop_the_world_hook();
 
 		// Prevent any new threads from being created
-		createThreadLock.exclusiveLock();
+		stopTheWorldLock.exclusiveLock();
 
 		uint count;
 
@@ -193,20 +196,20 @@ public:
 	}
 
 	void restartTheWorld() shared {
-		// Allow thread creation again.
-		createThreadLock.exclusiveUnlock();
-
 		while (resumeSuspendedThreads()) {
 			import sys.posix.sched;
 			sched_yield();
 		}
+
+		// Allow thread creation again.
+		stopTheWorldLock.exclusiveUnlock();
 
 		import d.gc.hooks;
 		__sd_gc_post_restart_the_world_hook();
 	}
 
 	void scanSuspendedThreads(ScanDg scan) shared {
-		assert(createThreadLock.count == SharedLock.Exclusive);
+		assert(stopTheWorldLock.count == SharedLock.Exclusive);
 
 		mThreadList.lock();
 		scope(exit) mThreadList.unlock();
