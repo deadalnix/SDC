@@ -12,28 +12,30 @@ extern(C) int pthread_create(pthread_t* thread, const pthread_attr_t* attr,
                              PthreadFunction start_routine, void* arg) {
 	auto runner = new ThreadRunner(start_routine, arg);
 
-	/**
-	 * We do not want the GC to stop this specific thread
-	 * while it is creating another thread.
-	 */
-	enterBusyState();
-	scope(exit) exitBusyState();
+	// Stop the world cannot happen during thread startup.
+	preventStopTheWorld();
 
-	/**
-	 * We notify the GC that we are starting a new thread.
-	 * This allows the GC to not stop the workd while a thread
-	 * is being created.
-	 */
-	enterThreadCreation();
-
-	auto ret =
-		pthread_create_trampoline(thread, attr, cast(PthreadFunction) runThread,
-		                          runner);
+	auto ret = pthread_create_trampoline(
+		thread, attr, cast(PthreadFunction) runThread!false, runner);
 	if (ret != 0) {
 		// The spawned thread will call this when there are no errors.
-		exitThreadCreation();
+		allowStopTheWorld();
 	}
 
+	return ret;
+}
+
+/**
+ * This special hook does not involve preventing "Stop the world". otherwise
+ * creates a thread in the same way.
+ */
+int createGCThread(pthread_t* thread, const pthread_attr_t* attr,
+                   PthreadFunction start_routine, void* arg) {
+	auto runner = new ThreadRunner(start_routine, arg);
+
+	auto ret =
+		pthread_create_trampoline(thread, attr,
+		                          cast(PthreadFunction) runThread!true, runner);
 	return ret;
 }
 
@@ -49,11 +51,11 @@ struct ThreadRunner {
 	}
 }
 
-void* runThread(ThreadRunner* runner) {
+void* runThread(bool IsGCThread)(ThreadRunner* runner) {
 	auto fun = runner.fun;
 	auto arg = runner.arg;
 
-	createThread();
+	createThread(IsGCThread);
 	__sd_gc_free(runner);
 
 	// Make sure we clean up after ourselves.
