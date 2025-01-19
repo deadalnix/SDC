@@ -361,9 +361,14 @@ private:
 				scan(s);
 			}
 
-			// Only suspended thread have their stack properly set.
-			// For detached threads, we just hope nothing's in there.
-			if (ss == SuspendState.Suspended) {
+			/**
+			 * Only suspended thread have their stack properly set.
+			 * For detached threads, we just hope nothing's in
+			 * there. If stackTop is null for suspended threads,
+			 * the responsibility of scanning the stack is done
+			 * elsewhere (e.g. Druntime).
+			 */
+			if (tc.stackTop !is null && ss == SuspendState.Suspended) {
 				import d.gc.range;
 				scan(makeRange(tc.stackTop, tc.stackBottom));
 			}
