@@ -32,7 +32,7 @@ void __sd_gc_global_scan(ScanDg scan) {
 	gState.scanRoots(scan);
 
 	import d.gc.thread;
-	scanSuspendedThreads(scan);
+	scanThreads(scan);
 
 	thread_scanAll_C(&scan, &__sd_scanAllThreadsFn);
 }

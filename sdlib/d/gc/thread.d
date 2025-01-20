@@ -98,8 +98,8 @@ void threadScan(ScanDg scan) {
 	scanStack(scan);
 }
 
-void scanSuspendedThreads(ScanDg scan) {
-	gThreadState.scanSuspendedThreads(scan);
+void scanThreads(ScanDg scan) {
+	gThreadState.scanThreads(scan);
 }
 
 private:
@@ -196,6 +196,9 @@ public:
 	}
 
 	void restartTheWorld() shared {
+		import d.gc.hooks;
+		__sd_gc_post_suspend_hook();
+
 		while (resumeSuspendedThreads()) {
 			import sys.posix.sched;
 			sched_yield();
@@ -204,17 +207,16 @@ public:
 		// Allow thread creation again.
 		stopTheWorldLock.exclusiveUnlock();
 
-		import d.gc.hooks;
 		__sd_gc_post_restart_the_world_hook();
 	}
 
-	void scanSuspendedThreads(ScanDg scan) shared {
+	void scanThreads(ScanDg scan) shared {
 		assert(stopTheWorldLock.count == SharedLock.Exclusive);
 
 		mThreadList.lock();
 		scope(exit) mThreadList.unlock();
 
-		(cast(ThreadState*) &this).scanSuspendedThreadsImpl(scan);
+		(cast(ThreadState*) &this).scanThreadsImpl(scan);
 	}
 
 private:
@@ -342,7 +344,7 @@ private:
 		return retry;
 	}
 
-	void scanSuspendedThreadsImpl(ScanDg scan) {
+	void scanThreadsImpl(ScanDg scan) {
 		assert(mThreadList.isHeld(), "Mutex not held!");
 
 		auto r = registeredThreads.range;
@@ -350,9 +352,12 @@ private:
 			auto tc = r.front;
 			scope(success) r.popFront();
 
-			// If the thread isn't suspended, move on.
+			// We want to scan the current thread, and any
+			// suspended or detached threads. Other threads are
+			// likely GC helper threads, and don't need scanning.
 			auto ss = tc.state.suspendState;
-			if (ss != SuspendState.Suspended && ss != SuspendState.Detached) {
+			if (tc !is &threadCache && ss != SuspendState.Suspended
+				    && ss != SuspendState.Detached) {
 				continue;
 			}
 
@@ -362,13 +367,13 @@ private:
 			}
 
 			/**
-			 * Only suspended thread have their stack properly set.
-			 * For detached threads, we just hope nothing's in
-			 * there. If stackTop is null for suspended threads,
-			 * the responsibility of scanning the stack is done
-			 * elsewhere (e.g. Druntime).
+			 * Only GC-managed threads have their stack properly
+			 * set. For detached threads, we just hope nothing's in
+			 * there. If stackTop is null for any attached threads,
+			 * scanning of the stack is done elsewhere (e.g.
+			 * Druntime).
 			 */
-			if (tc.stackTop !is null && ss == SuspendState.Suspended) {
+			if (tc.stackTop !is null) {
 				import d.gc.range;
 				scan(makeRange(tc.stackTop, tc.stackBottom));
 			}
