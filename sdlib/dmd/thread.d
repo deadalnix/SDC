@@ -32,7 +32,7 @@ void __sd_gc_global_scan(ScanDg scan) {
 	gState.scanRoots(scan);
 
 	import d.gc.thread;
-	scanSuspendedThreads(scan);
+	scanThreads(scan);
 
 	thread_scanAll_C(&scan, &__sd_scanAllThreadsFn);
 }
@@ -59,6 +59,12 @@ void __sd_gc_pre_suspend_hook(void* stackTop) {
 		return;
 	}
 
+	// Druntime is managing this thread, do not use our mechanism to scan
+	// the stacks, because druntime has a complex mechanism to deal with
+	// stacks (for fiber support).
+	import d.gc.tcache;
+	threadCache.stackTop = null;
+
 	/**
 	 * If the thread is managed by druntime, then we'll get the
 	 * TLS segments when calling thread_scanAll_C, so we can remove
@@ -68,7 +74,6 @@ void __sd_gc_pre_suspend_hook(void* stackTop) {
 	 * scan it eagerly, as registers containing possible pointers gets
 	 * pushed on it.
 	 */
-	import d.gc.tcache;
 	auto tls = threadCache.tlsSegments;
 	if (tls.ptr is null) {
 		return;
