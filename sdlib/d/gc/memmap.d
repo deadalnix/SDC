@@ -86,10 +86,20 @@ void pages_zero(void* addr, size_t size) {
 	}
 }
 
+void page_hugify(void* addr, size_t size) {
+	auto ret = madvise(addr, size, Madv.HugePage);
+	assert(ret == 0, "madvise failed!");
+}
+
+void page_dehugify(void* addr, size_t size) {
+	auto ret = madvise(addr, size, Madv.NoHugePage);
+	assert(ret == 0, "madvise failed!");
+}
+
 private:
 
 enum PagesFDTag = -1;
-enum MMapFlags = Map.Private | Map.Anon;
+enum MMapFlags = Map.Private | Map.Anonymous;
 
 void* os_pages_map(void* addr, size_t size, size_t alignment) {
 	assert(alignment >= PageSize && isPow2(alignment), "Invalid alignment!");

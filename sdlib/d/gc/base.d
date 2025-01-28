@@ -250,9 +250,21 @@ private:
 		auto size = BlockSize << shift;
 
 		import d.gc.memmap;
+		if (shift == 1) {
+			// We ran out of metadata on the first block, hugify it!
+			page_hugify(nextMetadataPage - BlockSize, BlockSize);
+		}
+
 		auto ptr = pages_map(null, size, BlockSize);
 		if (ptr is null) {
 			return false;
+		}
+
+		if (shift == 0) {
+			// We try to avoid using huge pages on the very first
+			// block of metadata to avoid haviong a large upfront
+			// cost per base for small bases.
+			page_dehugify(ptr, size);
 		}
 
 		nextMetadataPage = ptr;
