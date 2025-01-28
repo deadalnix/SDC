@@ -11,6 +11,8 @@ import d.gc.util;
 
 import sdc.intrinsics;
 
+enum ShouldZeroFreeSlabs = true;
+
 struct PageFiller {
 private:
 	@property
@@ -273,7 +275,8 @@ public:
 		mutex.lock();
 		scope(exit) mutex.unlock();
 
-		(cast(PageFiller*) &this).collectImpl(emap, gcCycle);
+		(cast(PageFiller*) &this)
+			.collectImpl(emap, gcCycle, arena.containsPointers);
 	}
 
 	/**
@@ -743,7 +746,8 @@ private:
 		}
 	}
 
-	void collectImpl(ref CachedExtentMap emap, ubyte gcCycle) {
+	void collectImpl(ref CachedExtentMap emap, ubyte gcCycle,
+	                 bool containsPointers) {
 		assert(mutex.isHeld(), "Mutex not held!");
 
 		auto sharedThis = cast(shared(PageFiller)*) &this;
@@ -753,8 +757,8 @@ private:
 		PriorityExtentHeap[BinCount] collectedSlabs;
 		auto slabs = collectedSlabs[0 .. BinCount];
 
-		collectDenseAllocations(emap, slabs);
-		collectSparseAllocations(emap, slabs, gcCycle);
+		collectDenseAllocations(emap, slabs, containsPointers);
+		collectSparseAllocations(emap, slabs, gcCycle, containsPointers);
 
 		sharedThis.arena.combineBinsAfterCollection(collectedSlabs);
 	}
@@ -815,8 +819,11 @@ private:
 		e.slabMetadataFlags.rawContent[nimbleIndex] = metadataFlags;
 	}
 
-	void collectDenseAllocations(ref CachedExtentMap emap,
-	                             PriorityExtentHeap[] slabs) {
+	void collectDenseAllocations(
+		ref CachedExtentMap emap,
+		PriorityExtentHeap[] slabs,
+		bool containsPointers
+	) {
 		assert(mutex.isHeld(), "Mutex not held!");
 
 		PriorityExtentHeap deadExtents;
@@ -856,6 +863,9 @@ private:
 				uint count = 0;
 				ulong occupancyMask = 0;
 
+				import d.gc.bitmap;
+				Bitmap!512 toZero;
+
 				foreach (i; 0 .. nimble) {
 					auto oldOccupancy = e.slabData.rawContent[i];
 					auto newOccupancy = oldOccupancy & bmp[i];
@@ -863,6 +873,9 @@ private:
 					occupancyMask |= newOccupancy;
 					auto evicted = oldOccupancy ^ newOccupancy;
 					count += popCount(evicted);
+					if (ShouldZeroFreeSlabs && containsPointers) {
+						toZero.rawContent[i] = evicted;
+					}
 
 					scope(success) e.slabData.rawContent[i] = newOccupancy;
 
@@ -878,6 +891,18 @@ private:
 				if (occupancyMask == 0) {
 					deadExtents.insert(e);
 					continue;
+				}
+
+				if (ShouldZeroFreeSlabs && count && containsPointers) {
+					// Zero runs of freed slots.
+					auto slotSize = binInfos[sc].slotSize;
+					uint current, index, length;
+					while (current < nslots && toZero
+						       .nextOccupiedRange(current, index, length)) {
+						memset(e.address + index * slotSize, 0,
+						       length * slotSize);
+						current = index + length;
+					}
 				}
 
 				e.bits += count * Extent.FreeSlotsUnit;
@@ -909,8 +934,12 @@ private:
 	/**
 	 * Sparse collection.
 	 */
-	void collectSparseAllocations(ref CachedExtentMap emap,
-	                              PriorityExtentHeap[] slabs, ubyte gcCycle) {
+	void collectSparseAllocations(
+		ref CachedExtentMap emap,
+		PriorityExtentHeap[] slabs,
+		ubyte gcCycle,
+		bool containsPointers
+	) {
 		assert(mutex.isHeld(), "Mutex not held!");
 
 		PriorityExtentHeap deadExtents;
@@ -976,6 +1005,22 @@ private:
 				if (newOccupancy == 0) {
 					deadExtents.insert(e);
 					continue;
+				}
+
+				// Clear any dead slots if they might contain pointers.
+				if (ShouldZeroFreeSlabs && containsPointers && evicted != 0) {
+					import d.gc.bitmap;
+					Bitmap!64 toZero;
+					toZero.rawContent[0] = evicted;
+					import d.gc.slab;
+					auto slotSize = binInfos[ec.sizeClass].slotSize;
+					uint current, index, length;
+					while (current < 64 && toZero
+						       .nextOccupiedRange(current, index, length)) {
+						memset(e.address + index * slotSize, 0,
+						       length * slotSize);
+						current = index + length;
+					}
 				}
 
 				auto count = popCount(evicted);
