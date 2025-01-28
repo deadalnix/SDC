@@ -154,12 +154,19 @@ private:
 		assert(isAligned(nextMetadataPage, PageSize),
 		       "Invalid nextMetadataPage alignment!");
 
-		scope(success) {
-			nextMetadataPage += PageSize;
-			availableMetadataPages--;
+		auto ptr = nextMetadataPage;
+		auto generation = currentGeneration;
+
+		availableMetadataPages--;
+		nextMetadataPage += PageSize;
+
+		// We just filled a block worth of metadata, make it huge!
+		if (isAligned(nextMetadataPage, BlockSize)) {
+			import d.gc.memmap;
+			page_hugify(nextMetadataPage - BlockSize, BlockSize);
 		}
 
-		return GenerationPointer(nextMetadataPage, currentGeneration);
+		return GenerationPointer(ptr, generation);
 	}
 
 	void* reserveAddressSpaceImpl(size_t size, size_t alignment) {
@@ -254,6 +261,10 @@ private:
 		if (ptr is null) {
 			return false;
 		}
+
+		// We try to avoid using huge pages right away so that
+		// each base remain cheap even when not used much.
+		page_dehugify(ptr, size);
 
 		nextMetadataPage = ptr;
 		availableMetadataPages = PagesInBlock << shift;
