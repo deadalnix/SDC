@@ -41,7 +41,6 @@ private:
 
 		import d.gc.thread;
 		stopTheWorld();
-		scope(exit) restartTheWorld();
 
 		import d.gc.global;
 		auto gcCycle = gState.nextGCCycle();
@@ -73,6 +72,8 @@ private:
 		 */
 		threadCache.flush();
 
+		restartTheWorld();
+
 		collect(gcCycle);
 
 		/**
@@ -82,6 +83,9 @@ private:
 		 * phase.
 		 */
 		gState.minimizeRoots();
+
+		// Probation period is over, threads can enter busy state now.
+		clearWorldProbation();
 	}
 
 	void prepareGCCycle() {
