@@ -13,7 +13,8 @@ jobs:
                 dc: [dmd-latest, dmd-beta]
 
         runs-on: ${{ matrix.os }}
-
+        env:
+            USE_LOWMEM: 1
         steps:
             - name: Install system dependencies
               run: sudo apt install nasm lld

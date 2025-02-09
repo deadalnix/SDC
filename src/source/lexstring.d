@@ -31,12 +31,19 @@ mixin template LexStringImpl(Token,
 					break;
 				}
 
-				assert(es.type == SequenceType.Invalid);
 				if (frontChar == '\'') {
 					popChar();
 				}
 
-				return getError(es.location, es.error);
+				if (es.type == SequenceType.Invalid) {
+					return getError(es.location, es.error);
+				}
+
+				assert(es.type == SequenceType.MultiCodePointHtmlEntity);
+				return getError(
+					start,
+					"This HTML entity requires 2 codepoints, and cannot be encoded in a single character.",
+				);
 
 			default:
 				dchar d;
@@ -266,6 +273,40 @@ mixin template LexStringImpl(Token,
 		);
 	}
 
+	auto getExpectedSequenceError(uint begin, string expected,
+	                              bool consume = false) {
+		return
+			getExpectedError!getEscapeSequenceError(begin, expected, consume);
+	}
+
+	EscapeSequence lexHtmlEntity(uint begin) {
+		popChar();
+
+		auto start = index;
+		auto count = popIdentifier();
+
+		char c = frontChar;
+
+		if (count == 0) {
+			auto e = getExpectedSequenceError(begin, "an HTML entity");
+			if (c == ';') {
+				popChar();
+			}
+
+			return e;
+		}
+
+		if (c != ';') {
+			return getExpectedSequenceError(begin, "`;`");
+		}
+
+		auto end = popChar();
+
+		import source.htmlentities;
+		return matchHtmlEntity(base.getWithOffsets(begin, index), context,
+		                       content[start .. end]);
+	}
+
 	EscapeSequence lexEscapeSequence(uint begin) {
 		dchar c = frontChar;
 		switch (c) {
@@ -325,10 +366,10 @@ mixin template LexStringImpl(Token,
 				return lexUnicodeEscapeSequence!'U'(begin);
 
 			case '&':
-				assert(0, "HTML5 named character references not implemented");
+				return lexHtmlEntity(begin);
 
 			default:
-				return getExpectedError!getEscapeSequenceError(
+				return getExpectedSequenceError(
 					begin, "a valid escape sequence", true);
 		}
 
@@ -629,4 +670,35 @@ unittest {
 		[TokenType.Invalid, TokenType.IntegerLiteral, TokenType.Invalid,
 		 TokenType.Invalid]
 	);
+
+	// Check HTML entities escape sequences.
+	checkLexString(
+		`"\&lt;\&gt;\&amp;\&nbsp;\&twoheadrightarrow;\&leftrightsquigarrow;"`,
+		"<>&\u00a0↠↭");
+	checkLexString(
+		`"\&ReverseUpEquilibrium;\&CounterClockwiseContourIntegral;"`, "⥯∳");
+	checkLexString(`"\&nlE;\&bne;\&fjlig;\&NotNestedGreaterGreater;"`,
+	               "\u2266\u0338=\u20e5fj\u2aa2\u0338");
+	checkLexChar(`'\&CounterClockwiseContourIntegral;'`, 0x2233);
+
+	checkLexInvalid(`"\&;"`, `Expected an HTML entity, not ';'.`);
+	checkLexInvalid(`"\&amp"`, "Expected `;`, not '\"'.");
+	checkLexInvalid(`"\&a;"`, "`a` is not a valid HTML entity.");
+	checkLexInvalid(`"\&aa;"`, "`aa` is not a valid HTML entity.");
+	checkLexInvalid(`"\&aaaa;"`, "`aaaa` is not a valid HTML entity.");
+	checkLexInvalid(
+		`"\&CounterClockwiseContourIntegrall;"`,
+		"`CounterClockwiseContourIntegrall` is not a valid HTML entity.");
+	checkLexInvalid(
+		`'\&NotNestedGreaterGreater;'`,
+		"This HTML entity requires 2 codepoints, and cannot be encoded in a single character.",
+	);
+
+	checkTokenSequence(`'\&whatever;'"b"`,
+	                   [TokenType.Invalid, TokenType.StringLiteral]);
+	checkTokenSequence(`'\&whatever'"b"`,
+	                   [TokenType.Invalid, TokenType.StringLiteral]);
+	checkTokenSequence(`'\&;'"b"`,
+	                   [TokenType.Invalid, TokenType.StringLiteral]);
+	checkTokenSequence(`'\&'"b"`, [TokenType.Invalid, TokenType.StringLiteral]);
 }
