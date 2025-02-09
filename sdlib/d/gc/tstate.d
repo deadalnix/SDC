@@ -62,7 +62,7 @@ public:
 		}
 	}
 
-	void detach() {
+	void assumeDetached() {
 		auto s = state.load();
 		while (true) {
 			auto n = s - SuspendState.Signaled + SuspendState.Detached;
@@ -74,6 +74,17 @@ public:
 				break;
 			}
 		}
+	}
+
+	void detach() {
+		import d.gc.tcache;
+		assert(&threadCache.state is &this,
+		       "Cannot detach manually from outside the thread!");
+
+		// should only ever be called while in a normal thread state.
+		size_t s = RunningState;
+		auto succeeded = state.casWeak(s, SuspendState.Detached);
+		assert(succeeded);
 	}
 
 	bool onSuspendSignal() {
