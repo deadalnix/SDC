@@ -156,15 +156,25 @@ public:
 	}
 
 	bool nextFreeRange(uint start, ref uint index, ref uint length) const {
+		return nextRange!false(start, index, length);
+	}
+
+	bool nextOccupiedRange(uint start, ref uint index, ref uint length) const {
+		return nextRange!true(start, index, length);
+	}
+
+	bool nextRange(bool V)(uint start, ref uint index, ref uint length) const {
 		// FIXME: in contract.
 		assert(start < N);
 
-		auto i = findClear(start);
+		enum NotV = !V;
+
+		auto i = findValue!V(start);
 		if (i >= N) {
 			return false;
 		}
 
-		auto j = findSet(i);
+		auto j = findValue!NotV(i);
 		index = i;
 		length = j - i;
 		return true;
