@@ -307,7 +307,9 @@ struct Caster(bool isExplicit, alias bailoutOverride = null) {
 					return CastKind.UPad;
 				}
 
-				return CastKind.Invalid;
+				return isFloat(bt)
+					? CastKind.UnsignedToFloat
+					: CastKind.Invalid;
 
 			case Char:
 				t = integralOfChar(t);
@@ -325,6 +327,12 @@ struct Caster(bool isExplicit, alias bailoutOverride = null) {
 			     Ucent:
 				if (isExplicit && bt == Bool) {
 					return CastKind.IntToBool;
+				}
+
+				if (isFloat(bt)) {
+					return isSigned(t)
+						? CastKind.SignedToFloat
+						: CastKind.UnsignedToFloat;
 				}
 
 				if (!isIntegral(bt)) {
@@ -349,7 +357,22 @@ struct Caster(bool isExplicit, alias bailoutOverride = null) {
 				}
 
 			case Float, Double, Real:
-				assert(0, "Floating point casts are not implemented");
+				// Cast from a float to a float.
+				if (isFloat(bt)) {
+					assert(bt != t);
+					return bt < t ? CastKind.FloatTrunc : CastKind.FloatExtend;
+				}
+
+				if (!isExplicit) {
+					return bailout(t);
+				}
+				if (isIntegral(bt) && canConvertToIntegral(bt)) {
+						return isSigned(isChar(bt) ? integralOfChar(bt) : bt)
+							? CastKind.FloatToSigned
+							: CastKind.FloatToUnsigned;
+				} else {
+					return CastKind.Invalid;
+				}
 
 			case Null:
 				if (isExplicit && canConvertToIntegral(bt)) {
@@ -673,5 +696,95 @@ struct Caster(bool isExplicit, alias bailoutOverride = null) {
 	import d.ir.error;
 	CastKind visit(CompileError e) {
 		return CastKind.Invalid;
+	}
+}
+
+version(unittest) {
+	BuiltinType[] floatTypes =
+		[BuiltinType.Float, BuiltinType.Double, BuiltinType.Real];
+	BuiltinType[] signedTypes =
+		[BuiltinType.Byte, BuiltinType.Short, BuiltinType.Int, BuiltinType.Long,
+		 BuiltinType.Cent];
+	BuiltinType[] unsignedTypes =
+		[BuiltinType.Ubyte, BuiltinType.Ushort, BuiltinType.Uint,
+		 BuiltinType.Ulong, BuiltinType.Ucent];
+	void checkCastKind(
+		const BuiltinType from,
+		const BuiltinType to,
+		const CastKind explicitShouldBe,
+		const CastKind implicitShouldBe
+	) {
+		Type fromAsType = Type.get(from);
+		Type toAsType = Type.get(to);
+		import std.format : format;
+		const explicitResult = explicitCastFrom(null, fromAsType, toAsType);
+		assert(
+			explicitResult == explicitShouldBe,
+			format("Explicit cast yielded `%s`, when `%s` was expected",
+			       explicitResult, explicitShouldBe)
+		);
+		const implicitResult = implicitCastFrom(null, fromAsType, toAsType);
+		assert(
+			implicitResult == implicitShouldBe,
+			format("Implicit cast yielded `%s`, when `%s` was expected",
+			       implicitResult, implicitShouldBe)
+		);
+	}
+}
+
+@("Float to float casts")
+unittest {
+	foreach (from; floatTypes)
+		foreach (to; floatTypes) {
+			const shouldBe = from == to
+				? CastKind.Exact
+				: (from < to ? CastKind.FloatExtend : CastKind.FloatTrunc);
+			checkCastKind(from, to, shouldBe, shouldBe);
+		}
+}
+
+@("Bools can be casted to floats")
+unittest {
+	foreach (to; floatTypes) {
+		checkCastKind(BuiltinType.Bool, to, CastKind.UnsignedToFloat,
+		              CastKind.UnsignedToFloat);
+	}
+}
+
+@("Signed types can be casted to floats")
+unittest {
+	foreach (from; signedTypes) {
+		foreach (to; floatTypes) {
+			checkCastKind(from, to, CastKind.SignedToFloat,
+			              CastKind.SignedToFloat);
+		}
+	}
+}
+
+@("Unsigned types can be casted to floats")
+unittest {
+	foreach (from; unsignedTypes) {
+		foreach (to; floatTypes) {
+			checkCastKind(from, to, CastKind.UnsignedToFloat,
+			              CastKind.UnsignedToFloat);
+		}
+	}
+}
+
+@("Float casts to signed types")
+unittest {
+	foreach (from; floatTypes) {
+		foreach (to; signedTypes) {
+			checkCastKind(from, to, CastKind.FloatToSigned, CastKind.Invalid);
+		}
+	}
+}
+
+@("Float casts to unsigned types")
+unittest {
+	foreach (from; floatTypes) {
+		foreach (to; unsignedTypes) {
+			checkCastKind(from, to, CastKind.FloatToUnsigned, CastKind.Invalid);
+		}
 	}
 }
