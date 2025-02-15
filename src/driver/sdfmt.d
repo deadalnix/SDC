@@ -3,6 +3,7 @@ module driver.sdfmt;
 int main(string[] args) {
 	bool dbg = false;
 	bool inPlace = false;
+	string assumeFilename;
 
 	import std.getopt;
 	try {
@@ -11,13 +12,14 @@ int main(string[] args) {
 			args, std.getopt.config.caseSensitive,
 			"debug", "Enable debug",          &dbg,
 			"i",     "Format files in place", &inPlace,
+			"assume-filename", `Fake filename to use for stdin input, used for config file lookup and -i`, &assumeFilename,
 			// sdfmt on
 		);
 
-		if (help_info.helpWanted || args.length == 1) {
+		if (help_info.helpWanted) {
 			import std.stdio;
 			writeln("The Snazzy D Compiler - Code Formatter");
-			writeln("Usage: sdfmt [options] file.d");
+			writeln("Usage: sdfmt [options] [file.d ...]");
 			writeln("Options:");
 
 			foreach (option; help_info.options) {
@@ -42,12 +44,10 @@ int main(string[] args) {
 		return 1;
 	}
 
-	auto files = args[1 .. $];
-
 	import source.context;
 	auto context = new Context();
 
-	foreach (filename; files) {
+	void processFile(string filename, bool readFromStdin = false) {
 		import format.config;
 		Config conf;
 
@@ -55,7 +55,19 @@ int main(string[] args) {
 		conf.buildLocalConfig("sdfmt", context, filename);
 
 		import source.location;
-		auto base = context.registerFile(Location.init, filename, "");
+		Position base;
+		if (readFromStdin) {
+			import std.array, std.stdio;
+			const stdinData = stdin.byChunk(4096).join;
+
+			import source.util.utf8;
+			const sanitizedData = convertToUTF8(stdinData);
+
+			base = context
+				.registerFile(Location.init, filename, "", sanitizedData);
+		} else {
+			base = context.registerFile(Location.init, filename, "");
+		}
 
 		import format.parser;
 		auto chunks = Parser(base, context).parse();
@@ -79,6 +91,16 @@ int main(string[] args) {
 			import std.stdio;
 			write(o);
 		}
+	}
+
+	const files = args[1 .. $];
+	if (files.length == 0) {
+		// read from stdin
+		const fakeFilename = assumeFilename.length ? assumeFilename : "stdin";
+		processFile(fakeFilename, true);
+	} else {
+		foreach (filename; files)
+			processFile(filename);
 	}
 
 	return 0;
