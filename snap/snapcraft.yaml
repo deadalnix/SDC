@@ -1,0 +1,141 @@
+name: sdc
+version: HEAD
+summary: A sane D compiler with an LLVM backend
+description: |
+    SDC is a from-scratch implementation of a D compiler written itself
+    in the D programming language, while using LLVM as its backend.  It
+    is currently under heavy development, and hence provides a limited
+    feature set that is not yet suitable for production work.
+
+    A major project goal is to provide a D compiler as a library (libd)
+    so as to support the development of a much wider range of D tools.
+
+confinement: classic
+grade: devel
+
+apps:
+  sdc:
+    command: bin/sdc
+
+parts:
+  sdc:
+    source: .
+    source-commit: HEAD
+    source-type: git
+    plugin: make
+    make-parameters:
+    - LLVM_CONFIG=../../../stage/bin/llvm-config
+    - DFLAGS=-m64 -w -debug -g -unittest
+    - LDFLAGS=-L../../../stage/lib
+    artifacts:
+    - bin
+    - import
+    - lib
+    - sdlib
+    - LICENCE
+    organize:
+      sdlib: import
+      LICENCE: snap/license.txt
+    stage:
+    - -bin/sdc.conf
+    - -import/sdc/*.mak
+    build-packages:
+    - gcc
+    - make
+    - nasm
+    after:
+    - dmd
+    - druntime
+    - phobos
+    - llvm
+    - snap-config
+
+  snap-config:
+    plugin: dump
+    source: snap-config
+    organize:
+      dmd.conf: bin/dmd.conf
+      sdc.conf: bin/sdc.conf
+    prime:
+    - -bin/dmd.conf
+
+  dmd:
+    source: https://github.com/dlang/dmd.git
+    source-tag: &dmd-version v2.072.2
+    source-type: git
+    plugin: make
+    makefile: posix.mak
+    make-parameters:
+    - AUTO_BOOTSTRAP=1
+    - RELEASE=1
+    organize:
+      linux/bin32: bin
+      linux/bin64: bin
+    stage:
+    - -bin/dmd.conf
+    - -linux
+    - -samples
+    prime:
+    - -*
+    build-packages:
+    - curl
+    - g++
+
+  druntime:
+    source: https://github.com/dlang/druntime.git
+    source-tag: *dmd-version
+    source-type: git
+    plugin: make
+    makefile: posix.mak
+    make-parameters:
+    - DMD=../../dmd/build/src/dmd
+    organize:
+      src/druntime/import: import/dmd
+    stage:
+    - -src
+    prime:
+    - -*
+    build-packages:
+    - gcc
+    after:
+    - dmd
+
+  phobos:
+    source: https://github.com/dlang/phobos.git
+    source-tag: *dmd-version
+    source-type: git
+    plugin: make
+    makefile: posix.mak
+    make-parameters:
+    - DMD=../../dmd/build/src/dmd
+    - DRUNTIME_PATH=../../druntime/build
+    - VERSION=../../dmd/build/VERSION
+    organize:
+      linux/lib32: lib
+      linux/lib64: lib
+      src/phobos: import/dmd
+    stage:
+    - -lib/libphobos2.so
+    - -lib/libphobos2.so.0.72.2
+    - -linux
+    - -src
+    prime:
+    - -*
+    build-packages:
+    - gcc
+    after:
+    - dmd
+    - druntime
+
+  llvm:
+    source: http://releases.llvm.org/3.9.1/llvm-3.9.1.src.tar.xz
+    source-checksum: sha3_512/cd1bd92c999aa82b79e033d5c6409efa3437e9b6bc22840c3cc9105447e2f96203096cd2857ada8de2d327a43cb423d09ec8b71edd16f7c9b72f5221408cd199
+    plugin: cmake
+    configflags:
+    - -DCMAKE_BUILD_TYPE=Release
+    - -DLLVM_BINUTILS_INCDIR=/usr/include
+    prime:
+    - -*
+    build-packages:
+    - binutils-dev
+    - g++
