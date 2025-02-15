@@ -1,6 +1,5 @@
 DMD ?= dmd
 NASM ?= nasm
-RDMD ?= rdmd
 
 ARCHFLAG ?= -m64
 DFLAGS = $(ARCHFLAG) -Isrc -w -debug -g

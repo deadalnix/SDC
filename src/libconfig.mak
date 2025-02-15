@@ -10,7 +10,7 @@ $(LIBCONFIG): obj/config.o
 	ar rcs "$@" $^
 
 check-config: $(LIBCONFIG_SRC)
-	$(RDMD) $(DFLAGS) -unittest -i $(addprefix --extra-file=, $^) --eval="assert(true)"
+	$(DMD) $(DFLAGS) -unittest -i -main -run $^
 
 check: check-config
 .PHONY: check-config
