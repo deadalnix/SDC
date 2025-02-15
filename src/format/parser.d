@@ -2440,6 +2440,7 @@ private:
 
 	bool parseFunctionPostfix() {
 		auto guard = span!IndentSpan(2);
+		int nNewSyntaxContracts = 0;
 
 		while (true) {
 			clearSeparator();
@@ -2462,6 +2463,11 @@ private:
 					if (lookahead.front.type == OpenBrace) {
 						nextToken();
 						goto ContractBlock;
+					} else {
+						++nNewSyntaxContracts;
+						if (nNewSyntaxContracts > 1) {
+							newline();
+						}
 					}
 
 					split();
@@ -2476,6 +2482,11 @@ private:
 					if (lookahead.front.type == OpenBrace) {
 						nextToken();
 						goto ContractBlock;
+					} else {
+						++nNewSyntaxContracts;
+						if (nNewSyntaxContracts > 1) {
+							newline();
+						}
 					}
 
 					split();
