@@ -25,6 +25,12 @@ private:
 
 public:
 	this(uint threadCount, ubyte gcCycle, AddressRange managedAddressSpace) {
+		if (threadCount == 0) {
+			import d.gc.cpu;
+			threadCount = getCoreCount();
+			assert(threadCount >= 1, "Expected at least one thread!");
+		}
+
 		activeThreads = threadCount;
 
 		this._gcCycle = gcCycle;
@@ -32,12 +38,7 @@ public:
 	}
 
 	this(ubyte gcCycle, AddressRange managedAddressSpace) {
-		import d.gc.cpu;
-		auto nthreads = getCoreCount();
-		assert(nthreads >= 1, "Expected at least one thread!");
-
-		// nthreads = 1;
-		this(nthreads, gcCycle, managedAddressSpace);
+		this(0, gcCycle, managedAddressSpace);
 	}
 
 	@property

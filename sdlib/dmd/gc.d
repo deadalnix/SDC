@@ -133,3 +133,8 @@ void* __sd_gc_alloc_from_druntime(size_t size, uint flags, void* finalizer) {
 
 	return threadCache.alloc(size, containsPointers, false);
 }
+
+void __sd_gc_set_scanning_thread_count(uint nThreads) {
+	import d.gc.collector;
+	gCollectorState.setScanningThreads(nThreads);
+}
