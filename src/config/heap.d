@@ -32,19 +32,23 @@ package:
 	}
 
 public:
-	bool isString() const {
+	@safe @nogc
+	bool isString() const pure nothrow {
 		return kind == Kind.String;
 	}
 
-	bool isArray() const {
+	@safe @nogc
+	bool isArray() const pure nothrow {
 		return kind == Kind.Array;
 	}
 
-	bool isObject() const {
+	@safe @nogc
+	bool isObject() const pure nothrow {
 		return kind == Kind.Object;
 	}
 
-	bool isMap() const {
+	@safe @nogc
+	bool isMap() const pure nothrow {
 		return kind == Kind.Map;
 	}
 }
@@ -106,19 +110,27 @@ package:
 	}
 
 package:
-	ref inout(VString) toVString() inout in(isString()) {
+	@trusted @nogc
+	ref inout(VString) toVString() inout nothrow pure return
+	in(isString()) {
 		return *(cast(inout(VString)*) &this);
 	}
 
-	ref inout(VArray) toVArray() inout in(isArray()) {
+	@trusted @nogc
+	ref inout(VArray) toVArray() inout nothrow pure return
+	in(isArray()) {
 		return *(cast(inout(VArray)*) &this);
 	}
 
-	ref inout(VObject) toVObject() inout in(isObject()) {
+	@trusted @nogc
+	ref inout(VObject) toVObject() inout nothrow pure return
+	in(isObject()) {
 		return *(cast(inout(VObject)*) &this);
 	}
 
-	ref inout(VMap) toVMap() inout in(isMap()) {
+	@trusted @nogc
+	ref inout(VMap) toVMap() inout nothrow pure return
+	in(isMap()) {
 		return *(cast(inout(VMap)*) &this);
 	}
 
@@ -133,8 +145,10 @@ package:
 		return dispatch!fun(this);
 	}
 
-	hash_t toHash() const {
-		static fun(T)(T x) {
+	@safe
+	size_t toHash() const nothrow {
+		@safe
+		static fun(T)(T x) nothrow {
 			return x.toHash();
 		}
 
@@ -368,12 +382,14 @@ public:
 		return rhs.isString() && rhs.toVString() == this;
 	}
 
-	hash_t toHash() const {
+	@safe
+	size_t toHash() const nothrow {
 		import config.hash;
 		return Hasher().hash(toString());
 	}
 
-	string toString() const {
+	@trusted
+	string toString() const nothrow {
 		auto ptr = cast(immutable char*) (impl + 1);
 		return ptr[0 .. tag.length];
 	}
@@ -501,7 +517,8 @@ public:
 		return rhs.isArray() && rhs.toVArray() == this;
 	}
 
-	hash_t toHash() const {
+	@safe
+	size_t toHash() const nothrow {
 		import config.hash;
 		return Hasher().hash(toArray());
 	}
@@ -511,7 +528,8 @@ public:
 		return format!"[%-(%s, %)]"(toArray().map!(v => v.dump()));
 	}
 
-	inout(Value)[] toArray() inout {
+	@trusted
+	inout(Value)[] toArray() inout nothrow {
 		auto ptr = cast(inout Value*) (impl + 1);
 		return ptr[0 .. tag.length];
 	}

@@ -248,21 +248,21 @@ unittest {
 struct VObjectKey {
 	union {
 		VString str;
-		HeapValue heapValue;
 		ulong payload;
 	}
 
-	bool isUndefined() const {
+	@safe
+	bool isUndefined() const nothrow {
 		return payload == 0;
 	}
 
 	void clear() {
-		heapValue = null;
+		payload = 0;
 	}
 
 	void destroy() {
 		if (!isUndefined()) {
-			heapValue.release();
+			str.destroy();
 			clear();
 		}
 	}
@@ -271,8 +271,14 @@ struct VObjectKey {
 		return str.dump();
 	}
 
-	hash_t toHash() const {
-		return isUndefined() ? 0 : str.toHash();
+	@trusted
+	inout(VString) getString() inout nothrow in(!isUndefined) {
+		return str;
+	}
+
+	@safe
+	hash_t toHash() const nothrow {
+		return isUndefined() ? 0 : getString().toHash();
 	}
 
 	VObjectKey opAssign(K)(K k) if (isKeyLike!K) {
@@ -395,7 +401,8 @@ public:
 		return format!"[%-(%s, %)]"(entries.map!(e => e.dump()));
 	}
 
-	hash_t toHash() const {
+	@safe
+	hash_t toHash() const nothrow {
 		import config.hash;
 		auto h = Hasher(length);
 
@@ -503,13 +510,13 @@ public:
 	}
 
 private:
-	@property
+	@property @trusted
 	inout(Bucket)[] buckets() inout {
 		auto ptr = cast(inout Bucket*) (impl + 1);
 		return ptr[0 .. bucketCount];
 	}
 
-	@property
+	@property @trusted
 	inout(Entry)[] entries() inout {
 		auto ptr = cast(inout Entry*) (buckets.ptr + bucketCount);
 		return ptr[0 .. tag.length];

@@ -1,5 +1,6 @@
 module source.swar.util;
 
+@trusted
 auto unalignedLoad(T)(string s) in(s.length >= T.sizeof) {
 	return *(cast(T*) s.ptr);
 }
@@ -17,6 +18,7 @@ auto read(T)(string s) {
 	return v;
 }
 
+@trusted
 auto unalignedLoad(T)(const(ubyte)[] data) in(data.length >= T.sizeof) {
 	return *(cast(T*) data.ptr);
 }

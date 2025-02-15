@@ -30,7 +30,8 @@ enum isHashable(T) = is(typeof(const(T).init.toHash()) : hash_t);
 struct Hasher {
 	ulong state = 0;
 
-	hash_t mix(ulong k) {
+	@safe @nogc
+	hash_t mix(ulong k) pure nothrow {
 		import util.math;
 		auto hi = mulhi(state, k);
 		auto lo = state * k;
