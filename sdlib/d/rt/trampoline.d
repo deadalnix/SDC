@@ -96,7 +96,15 @@ int resolve_pthread_create(pthread_t* thread, const pthread_attr_t* attr,
 		cast(PthreadCreateType) dlsym(RTLD_NEXT, "pthread_create");
 	if (real_pthread_create is null) {
 		import core.stdc.stdlib, core.stdc.stdio;
-		printf("Failed to locate pthread_create!");
+		printf("Failed to locate pthread_create!\n");
+		exit(1);
+	}
+
+	if (cast(void*) real_pthread_create is cast(void*) &pthread_create) {
+		import core.stdc.stdlib, core.stdc.stdio;
+		printf(
+			"Could not load subsequent pthread_create! Avoiding stack overflow\n"
+		);
 		exit(1);
 	}
 
